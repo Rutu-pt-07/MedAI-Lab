@@ -1,0 +1,325 @@
+--- Cell 0 ---
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import LabelEncoder
+from sklearn.feature_selection import mutual_info_classif
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import OrdinalEncoder
+
+--- Cell 1 ---
+df=pd.read_csv('/content/Huntington_Disease_Dataset.csv')
+
+--- Cell 2 ---
+df.head()
+
+--- Cell 3 ---
+df.shape
+
+--- Cell 4 ---
+df.info()
+
+--- Cell 5 ---
+df.isnull().sum()
+--- Cell 6 ---
+0nly cognitive decline has null values
+--- Cell 7 ---
+# fill in the unkown values in cognitive decline with another variable : 'unknown'
+
+df['Cognitive_Decline'] = df['Cognitive_Decline'].fillna('Unknown')
+
+--- Cell 8 ---
+df.isnull().sum()
+--- Cell 9 ---
+df.describe(include='all')
+--- Cell 10 ---
+# drop the not important/features with all unique values
+
+drop_column = ['Patient_ID', 'Random_Protein_Sequence', 'Random_Gene_Sequence']
+df = df.drop(columns=drop_column )
+
+--- Cell 11 ---
+# 1. Binary Encoding (Yes/No or Male/Female)
+df['Family_History'] = df['Family_History'].map({'Yes': 1, 'No': 0})
+df['Sex'] = df['Sex'].map({'Male': 1, 'Female': 0})   # assuming strictly binary
+
+--- Cell 12 ---
+df['Motor_Symptoms'].unique() #ordinal
+--- Cell 13 ---
+df['Cognitive_Decline'].unique() # ordinal
+--- Cell 14 ---
+df['Gene_Mutation_Type'].unique() # nominal
+--- Cell 15 ---
+df['Disease_Stage'].unique() # target col : nominal
+--- Cell 16 ---
+df['Gene/Factor'].unique() #nominal
+--- Cell 17 ---
+df['Chromosome_Location'].unique() #nominal
+--- Cell 18 ---
+df['Function'].unique() #nominal
+--- Cell 19 ---
+df['Effect'].unique() #nominal
+--- Cell 20 ---
+df['Category'].unique() #nominal
+--- Cell 21 ---
+# 2. Ordinal Encoding (progressive categories)
+motor_order = [['Mild', 'Moderate', 'Severe']]
+motor_encoder = OrdinalEncoder(categories=motor_order)
+df[['Motor_Symptoms']] = motor_encoder.fit_transform(df[['Motor_Symptoms']])
+
+# Cognitive_Decline: handle Unknown specially
+cog_order = [['Unknown', 'Mild', 'Moderate', 'Severe']]
+cog_encoder = OrdinalEncoder(categories=cog_order)
+df[['Cognitive_Decline']] = cog_encoder.fit_transform(df[['Cognitive_Decline']])
+
+--- Cell 22 ---
+from sklearn.preprocessing import StandardScaler
+
+# Continuous numerical columns
+num_cols = ['Age', 'HTT_CAG_Repeat_Length', 'Chorea_Score',
+            'Brain_Volume_Loss', 'Functional_Capacity',
+            'HTT_Gene_Expression_Level', 'Protein_Aggregation_Level']
+
+scaler = StandardScaler()
+df[num_cols] = scaler.fit_transform(df[num_cols])
+
+--- Cell 23 ---
+import pandas as pd
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+import umap.umap_ as umap
+import plotly.express as px
+
+# --- 1. OneHot encode nominal columns ---
+nominal_cols = ['Gene_Mutation_Type', 'Gene/Factor', 'Chromosome_Location',
+                'Function', 'Effect', 'Category']
+
+ohe = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
+nominal_encoded = ohe.fit_transform(df[nominal_cols])
+
+nominal_encoded_df = pd.DataFrame(
+    nominal_encoded,
+    columns=ohe.get_feature_names_out(nominal_cols),
+    index=df.index
+)
+
+# --- 2. Merge everything except target ---
+X_encoded_df = pd.concat(
+    [df.drop(nominal_cols + ['Disease_Stage'], axis=1),
+     nominal_encoded_df],
+    axis=1
+)
+
+y = df['Disease_Stage']   # target for coloring
+
+# --- 3. Scale ALL features together ---
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X_encoded_df)
+
+# --- 4. UMAP in 3D ---
+umap_3d = umap.UMAP(n_components=3, random_state=42)
+X_umap_3d = umap_3d.fit_transform(X_scaled)
+
+# --- 5. Plot ---
+umap_df = pd.DataFrame(X_umap_3d, columns=['UMAP1', 'UMAP2', 'UMAP3'])
+umap_df['Disease_Stage'] = y.values
+
+fig = px.scatter_3d(
+    umap_df, x='UMAP1', y='UMAP2', z='UMAP3',
+    color='Disease_Stage',
+    title="3D UMAP Projection (scaled features)",
+    opacity=0.7
+)
+fig.show()
+
+--- Cell 24 ---
+from sklearn.preprocessing import LabelEncoder
+from umap import UMAP
+import plotly.express as px
+import pandas as pd
+
+# --- Unsupervised ---
+umap_unsupervised = UMAP(n_neighbors=50, min_dist=0.3,
+                         n_components=3, random_state=42)
+
+embedding_unsup = umap_unsupervised.fit_transform(X_scaled)
+
+plot_df_unsup = pd.DataFrame(embedding_unsup,
+                             columns=['UMAP1','UMAP2','UMAP3'])
+plot_df_unsup['Stage'] = df['Disease_Stage'].values   # raw labels
+
+fig = px.scatter_3d(plot_df_unsup, x='UMAP1', y='UMAP2', z='UMAP3',
+                    color='Stage', opacity=0.7, title="UMAP (Unsupervised)")
+fig.show()
+
+# --- Supervised ---
+# Encode y temporarily
+le = LabelEncoder()
+y_encoded = le.fit_transform(df['Disease_Stage'])
+
+umap_supervised = UMAP(n_neighbors=30, min_dist=0.2, n_components=3,
+                       random_state=42, target_metric='categorical')
+
+embedding_sup = umap_supervised.fit_transform(X_scaled, y_encoded)
+
+plot_df_sup = pd.DataFrame(embedding_sup,
+                           columns=['UMAP1','UMAP2','UMAP3'])
+plot_df_sup['Stage'] = df['Disease_Stage'].values   # use labels for coloring
+
+fig = px.scatter_3d(plot_df_sup, x='UMAP1', y='UMAP2', z='UMAP3',
+                    color='Stage', opacity=0.7, title="UMAP (Supervised)")
+fig.show()
+
+--- Cell 25 ---
+import plotly.express as px
+
+# Loop through all targets
+for target in TARGETS:
+    fig = px.scatter(
+        data_frame=plot_df,
+        x='x',
+        y='y',
+        color=target,   # dynamic target
+        title=f"t-SNE Scatter colored by {target}"
+    )
+    fig.show()
+
+--- Cell 26 ---
+import pandas as pd
+
+# Example: df is your dataset
+# Replace 'label' with the actual name of your target column
+X = df.drop(columns=['Disease_Stage'])   # features
+y = df['Disease_Stage']                  # target
+
+--- Cell 27 ---
+from sklearn.preprocessing import StandardScaler
+
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+--- Cell 28 ---
+# now time for scaling and normalization !!!
+'''
+columns with neumeric data include :
+  age
+  htt cag length
+  chorea score
+  brain loss volume
+  functional capacity
+  htt gene level
+  protien agg level
+
+'''
+
+--- Cell 29 ---
+
+
+--- Cell 30 ---
+'''
+step 1. perform data analysis
+step 2. data preprocessing:
+                           $ remove the null values using:
+                                                        option 1. mode --> not a very good option, might make the model biased
+                                                        option 2. front and back fill
+                                                        option 3. random state
+                                                        option 4. best option according to chatgpt is 'Uknown' variable since the number or percentage of null vlues is around 25%
+                           $ drop rgs, rps, pid [ones with all unique entries]
+                           $ encoding --> there are various types of encoding, encode multiclass values
+                           $ normalize --> all the continuous values have to be normalized/ scaled
+                            remaining preprocessing techniques
+step 3. check for class imbalance, and describe your data to perform a final data analysis
+step 4. split into test train and validation data 80: 20 ....ask gemini
+******* it is a multi-class classification where the target variable is categorical and not numerical, therefore encode the target variable using  appropriate encoding techniques **********
+step 5. train the model using custom neural network, try out different parameters including number of epochs
+step 6. since the target variable  has multiple classes we cannot use sigmoid activation function and thus we use multi class classification functions such as softmax etc
+step 7. make sure the accuracy is over 90% adn it is not overfit, also check for variance and bias
+step 8. plot the model validation and loss graphs to analyse how the data is being trained
+step 9. should i do feature engineering also
+******  whatever was or most of what was mentioned in the paper and what research asks for has to be done, which included normalization, scaling, hyper-parameter tuning..... is it necessary to use smote because in my casde there is almost no data imbalalnce ..my data is good!********
+'''
+
+--- Cell 31 ---
+# -------------------------------
+# 1. Define features (X) and target (y)
+# -------------------------------
+target_col = 'Disease_Stage'   # already encoded earlier
+
+X = df.drop(columns=[target_col])
+y = df[target_col]
+
+# -------------------------------
+# 2. Train / Validation / Test split
+# -------------------------------
+from sklearn.model_selection import train_test_split
+
+# Step 1: Split train vs temp (val+test)
+X_train, X_temp, y_train, y_temp = train_test_split(
+    X, y, test_size=0.3, stratify=y, random_state=42
+)
+
+# Step 2: Split temp into validation and test
+X_val, X_test, y_val, y_test = train_test_split(
+    X_temp, y_temp, test_size=0.5, stratify=y_temp, random_state=42
+)
+
+print("Train:", X_train.shape, y_train.shape)
+print("Validation:", X_val.shape, y_val.shape)
+print("Test:", X_test.shape, y_test.shape)
+--- Cell 32 ---
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Check counts
+print(y.value_counts())
+
+# Plot distribution
+sns.countplot(x=y)
+plt.title("Distribution of Disease Stages")
+plt.show()
+
+--- Cell 33 ---
+from sklearn.preprocessing import StandardScaler
+
+# Initialize scaler
+scaler = StandardScaler()
+
+# Fit ONLY on training set
+X_train_scaled = scaler.fit_transform(X_train)
+
+# Apply the same transformation to val & test
+X_val_scaled   = scaler.transform(X_val)
+X_test_scaled  = scaler.transform(X_test)
+
+--- Cell 34 ---
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers
+
+num_classes = len(y.unique())
+
+model = keras.Sequential([
+    layers.Input(shape=(X_train.shape[1],)),
+    layers.Dense(64, activation='relu'),
+    layers.Dropout(0.3),
+    layers.Dense(32, activation='relu'),
+    layers.Dense(num_classes, activation='softmax')   # multi-class output
+])
+
+model.compile(
+    optimizer='adam',
+    loss='sparse_categorical_crossentropy',
+    metrics=['accuracy']
+)
+
+--- Cell 35 ---
+history = model.fit(
+    X_train, y_train,
+    validation_data=(X_val, y_val),
+    epochs=50,
+    batch_size=32
+)
+
+--- Cell 36 ---
+
